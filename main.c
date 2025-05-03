@@ -3,12 +3,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h> /*  for sleep()  */
+#include <unistd.h>
+
+// to compile, use the following
+/* gcc main.c -o main -lncurses -lm */
+
+#define VERTICES_COUNT 8
 
 static int MAX_X = 0, MAX_Y = 0;
 const char BACKGROUND_CHAR = '.';
 const char LINE_CHAR = 'x';
 const float MAX_DISTANCE_FROM_LINE = 0.5f;
+const float CUBE_DISTANCE = 10.f;
+const float CUBE_SIDE = 5.f;
 
 /*    .+------+     */
 /* .'  |    .'|    */
@@ -102,12 +109,9 @@ int main(void) {
     fprintf(stderr, "Error initialising ncurses.\n");
     exit(EXIT_FAILURE);
   }
-
   getmaxyx(mainwin, MAX_Y, MAX_X);
-  const int numVertices = 8;
-  const int CUBE_DISTANCE = 10;
-  const float CUBE_SIDE = 5.f;
-  const vec3 cube_vertices[8] = {
+  // vertices of origo centered cube
+  const vec3 cube_vertices[VERTICES_COUNT] = {
       {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
       {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
       {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
@@ -116,7 +120,8 @@ int main(void) {
       {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
       {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
       {.x = -CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_SIDE / 2}};
-  vec3 vertices[8] = {
+  // vertices of modified cube
+  vec3 vertices[VERTICES_COUNT] = {
       {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE},
       {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_DISTANCE},
       {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE},
@@ -128,14 +133,12 @@ int main(void) {
        .y = -CUBE_SIDE / 2,
        .z = CUBE_DISTANCE + CUBE_SIDE}};
 
-  vec3 last_vertex = vertices[0];
-
-  vec3 projectedVert[8];
+  vec3 projectedVert[VERTICES_COUNT];
   float angle = 0;
 
   while (1) {
     fill_background();
-    for (uint32_t i = 0; i < numVertices; ++i) {
+    for (uint32_t i = 0; i < VERTICES_COUNT; ++i) {
       /* https://computergraphics.stackexchange.com/questions/8255/finding-the-projection-matrix-for-one-point-perspective
        */
       projectedVert[i].x = vertices[i].x / vertices[i].z;
@@ -149,6 +152,7 @@ int main(void) {
       projectedVert[i].y = projectedVert[i].y * MAX_Y + (float)MAX_Y / 2;
     }
 
+    // draw front and back face of cube and also interconnecting lines
     draw_line_by_vec3(projectedVert[0], projectedVert[1]);
     draw_line_by_vec3(projectedVert[1], projectedVert[3]);
     draw_line_by_vec3(projectedVert[3], projectedVert[2]);
@@ -164,7 +168,8 @@ int main(void) {
     draw_line_by_vec3(projectedVert[2], projectedVert[2 + 4]);
     draw_line_by_vec3(projectedVert[3], projectedVert[3 + 4]);
 
-    for (int k = 0; k < numVertices; ++k) {
+    // perform rotation on cube located at origo and offset it by CUBE_DISTANCE
+    for (int k = 0; k < VERTICES_COUNT; ++k) {
       vec3 current_cube_vertex = cube_vertices[k];
       rotate(&current_cube_vertex, angle / 5, angle, angle / 3);
       vertices[k] = current_cube_vertex;
