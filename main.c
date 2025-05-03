@@ -42,7 +42,7 @@ typedef struct vec3 {
 
 bool is_point_part_of_line(int starty, int startx, int endy, int endx,
                            int pointy, int pointx) {
-  // early return if point is outside the rectangle defined by stand and end
+  // early return if point is outside the rectangle defined by start and end
   if (!(((pointy <= endy) && (pointy >= starty)) ||
         ((pointy >= endy) && (pointy <= starty))))
     return false;
