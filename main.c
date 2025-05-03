@@ -10,6 +10,14 @@ const char BACKGROUND_CHAR = '.';
 const char LINE_CHAR = 'x';
 const float MAX_DISTANCE_FROM_LINE = 0.5f;
 
+/*    .+------+     */
+/* .'  |    .'|    */
+/* +---+--+'  |   */
+/* |   |  |   |   */
+/* |  ,+--+---+   */
+/* |.'    | .'    */
+/* +------+'      */
+
 void fill_background() {
   erase();
   for (int row = 0; row < MAX_Y; ++row) {
@@ -18,6 +26,12 @@ void fill_background() {
     }
   }
 }
+
+typedef struct vec3 {
+  float x;
+  float y;
+  float z;
+} vec3;
 
 bool is_point_part_of_line(int starty, int startx, int endy, int endx,
                            int pointy, int pointx) {
@@ -51,31 +65,114 @@ void draw_line(int starty, int startx, int endy, int endx) {
   }
 }
 
+void draw_line_by_vec3(vec3 start, vec3 end) {
+  draw_line(start.y, start.x, end.y, end.x);
+}
+
+// Applies yaw (Z), pitch (Y), roll (X) rotation to a point
+void rotate(vec3 *point, float yaw, float pitch, float roll) {
+  // Convert degrees to radians
+  float cy = cosf(yaw);
+  float sy = sinf(yaw);
+  float cp = cosf(pitch);
+  float sp = sinf(pitch);
+  float cr = cosf(roll);
+  float sr = sinf(roll);
+
+  // Rotation matrix (combined yaw-pitch-roll, ZYX order)
+  float R[3][3] = {{cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr},
+                   {sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr},
+                   {-sp, cp * sr, cp * cr}};
+
+  // Original point
+  float x = point->x;
+  float y = point->y;
+  float z = point->z;
+
+  // Apply rotation
+  point->x = R[0][0] * x + R[0][1] * y + R[0][2] * z;
+  point->y = R[1][0] * x + R[1][1] * y + R[1][2] * z;
+  point->z = R[2][0] * x + R[2][1] * y + R[2][2] * z;
+}
+
 int main(void) {
 
   WINDOW *mainwin;
-
-  /*  Initialize ncurses  */
-
   if ((mainwin = initscr()) == NULL) {
     fprintf(stderr, "Error initialising ncurses.\n");
     exit(EXIT_FAILURE);
   }
 
-  /*  Display "Hello, world!" in the centre of the
-      screen, call refresh() to show our changes, and
-      sleep() for a few seconds to get the full screen effect  */
-
   getmaxyx(mainwin, MAX_Y, MAX_X);
-  const char *text = "Hello, world!";
-  int counter = 0;
+  const int numVertices = 8;
+  const int CUBE_DISTANCE = 10;
+  const float CUBE_SIDE = 5.f;
+  const vec3 cube_vertices[8] = {
+      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
+      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
+      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
+      {.x = -CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
+      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
+      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
+      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
+      {.x = -CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_SIDE / 2}};
+  vec3 vertices[8] = {
+      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE},
+      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_DISTANCE},
+      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE},
+      {.x = -CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_DISTANCE},
+      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE + CUBE_SIDE},
+      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_DISTANCE + CUBE_SIDE},
+      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE + CUBE_SIDE},
+      {.x = -CUBE_SIDE / 2,
+       .y = -CUBE_SIDE / 2,
+       .z = CUBE_DISTANCE + CUBE_SIDE}};
+
+  vec3 last_vertex = vertices[0];
+
+  vec3 projectedVert[8];
+  float angle = 0;
+
   while (1) {
     fill_background();
-    counter = (counter + 1) % MAX_X;
-    draw_line(0, counter, 10, MAX_X - counter);
-    mvaddstr(MAX_Y / 2, MAX_X / 2 - strlen(text) / 2, text);
+    for (uint32_t i = 0; i < numVertices; ++i) {
+      /* https://computergraphics.stackexchange.com/questions/8255/finding-the-projection-matrix-for-one-point-perspective
+       */
+      projectedVert[i].x = vertices[i].x / vertices[i].z;
+      projectedVert[i].y = vertices[i].y / vertices[i].z;
+      // potential error handling
+      if (projectedVert[i].x < -1 || projectedVert[i].x > 1 ||
+          projectedVert[i].y < -1 || projectedVert[i].y > 1) {
+        continue;
+      }
+      projectedVert[i].x = projectedVert[i].x * MAX_X + (float)MAX_X / 2;
+      projectedVert[i].y = projectedVert[i].y * MAX_Y + (float)MAX_Y / 2;
+    }
+
+    draw_line_by_vec3(projectedVert[0], projectedVert[1]);
+    draw_line_by_vec3(projectedVert[1], projectedVert[3]);
+    draw_line_by_vec3(projectedVert[3], projectedVert[2]);
+    draw_line_by_vec3(projectedVert[2], projectedVert[0]);
+
+    draw_line_by_vec3(projectedVert[0 + 4], projectedVert[1 + 4]);
+    draw_line_by_vec3(projectedVert[1 + 4], projectedVert[3 + 4]);
+    draw_line_by_vec3(projectedVert[3 + 4], projectedVert[2 + 4]);
+    draw_line_by_vec3(projectedVert[2 + 4], projectedVert[0 + 4]);
+
+    draw_line_by_vec3(projectedVert[0], projectedVert[0 + 4]);
+    draw_line_by_vec3(projectedVert[1], projectedVert[1 + 4]);
+    draw_line_by_vec3(projectedVert[2], projectedVert[2 + 4]);
+    draw_line_by_vec3(projectedVert[3], projectedVert[3 + 4]);
+
+    for (int k = 0; k < numVertices; ++k) {
+      vec3 current_cube_vertex = cube_vertices[k];
+      rotate(&current_cube_vertex, angle / 5, angle, angle / 3);
+      vertices[k] = current_cube_vertex;
+      vertices[k].z += CUBE_DISTANCE;
+    }
+    angle += 0.1f;
     refresh();
-    usleep(1000 * 10);
+    usleep(1000 * 50);
   }
 
   /*  Clean up after ourselves  */
