@@ -1,3 +1,4 @@
+#include "libs/obj_loader/obj_parser.h"
 #include <curses.h>
 #include <math.h>
 #include <stdio.h>
@@ -7,8 +8,6 @@
 
 // to compile, use the following
 /* gcc main.c -o main -lncurses -lm */
-
-#define VERTICES_COUNT 8
 
 static int MAX_X = 0, MAX_Y = 0;
 const char BACKGROUND_CHAR = '.';
@@ -39,6 +38,19 @@ typedef struct vec3 {
   float y;
   float z;
 } vec3;
+
+typedef struct line {
+  vec3 start;
+  vec3 end;
+} line;
+
+typedef struct triangle {
+  vec3 points[3];
+} triangle;
+
+typedef struct square {
+  vec3 points[4];
+} square;
 
 bool is_point_part_of_line(int starty, int startx, int endy, int endx,
                            int pointy, int pointx) {
@@ -76,6 +88,24 @@ void draw_line_by_vec3(vec3 start, vec3 end) {
   draw_line(start.y, start.x, end.y, end.x);
 }
 
+void draw_line_by_obj_vector(struct obj_vector start, struct obj_vector end) {
+  draw_line(start.e[1], start.e[0], end.e[1], end.e[0]);
+}
+
+void draw_faces(struct obj_scene_data *model,
+                struct obj_vector *projected_vertices) {
+  for (size_t i = 0; i < model->face_count; ++i) {
+    struct obj_face current_face = *model->face_list[i];
+    for (size_t j = 0; j < current_face.vertex_count; ++j) {
+      struct obj_vector start =
+          projected_vertices[current_face.vertex_index[j]];
+      struct obj_vector end = projected_vertices
+          [current_face.vertex_index[(j + 1) % current_face.vertex_count]];
+      draw_line_by_obj_vector(start, end);
+    }
+  }
+}
+
 // Applies yaw (Z), pitch (Y), roll (X) rotation to a point
 void rotate(vec3 *point, float yaw, float pitch, float roll) {
   // Convert degrees to radians
@@ -102,78 +132,62 @@ void rotate(vec3 *point, float yaw, float pitch, float roll) {
   point->z = R[2][0] * x + R[2][1] * y + R[2][2] * z;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
 
   WINDOW *mainwin;
   if ((mainwin = initscr()) == NULL) {
     fprintf(stderr, "Error initialising ncurses.\n");
     exit(EXIT_FAILURE);
   }
+  if (argc < 2) {
+    fprintf(stderr, "Missing obj file.\nUsage: %s <model.obj>\n", argv[0]);
+    exit(EXIT_FAILURE);
+  }
   getmaxyx(mainwin, MAX_Y, MAX_X);
-  // vertices of origo centered cube
-  const vec3 cube_vertices[VERTICES_COUNT] = {
-      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
-      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
-      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
-      {.x = -CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = -CUBE_SIDE / 2},
-      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
-      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
-      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_SIDE / 2},
-      {.x = -CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_SIDE / 2}};
-  // vertices of modified cube
-  vec3 vertices[VERTICES_COUNT] = {
-      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE},
-      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_DISTANCE},
-      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE},
-      {.x = -CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_DISTANCE},
-      {.x = CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE + CUBE_SIDE},
-      {.x = CUBE_SIDE / 2, .y = -CUBE_SIDE / 2, .z = CUBE_DISTANCE + CUBE_SIDE},
-      {.x = -CUBE_SIDE / 2, .y = CUBE_SIDE / 2, .z = CUBE_DISTANCE + CUBE_SIDE},
-      {.x = -CUBE_SIDE / 2,
-       .y = -CUBE_SIDE / 2,
-       .z = CUBE_DISTANCE + CUBE_SIDE}};
+  // load obj file
+  struct obj_scene_data model;
+  int error = parse_obj_scene(&model, argv[1]);
+  if (error) {
+    fprintf(stderr, "Error! Could not parse provided obj file %s\n", argv[1]);
+    exit(EXIT_FAILURE);
+  }
+  int vertex_count = model.vertex_count;
 
-  vec3 projectedVert[VERTICES_COUNT];
+  struct obj_vector *projectedVert =
+      malloc(sizeof(struct obj_vector) * vertex_count);
   float angle = 0;
 
   while (1) {
     fill_background();
-    for (uint32_t i = 0; i < VERTICES_COUNT; ++i) {
+    for (uint32_t i = 0; i < vertex_count; ++i) {
       /* https://computergraphics.stackexchange.com/questions/8255/finding-the-projection-matrix-for-one-point-perspective
        */
-      projectedVert[i].x = vertices[i].x / vertices[i].z;
-      projectedVert[i].y = vertices[i].y / vertices[i].z;
+      projectedVert[i].e[0] =
+          model.vertex_list[i]->e[0] / model.vertex_list[i]->e[2];
+      projectedVert[i].e[1] =
+          model.vertex_list[i]->e[1] / model.vertex_list[i]->e[2];
       // potential error handling
-      if (projectedVert[i].x < -1 || projectedVert[i].x > 1 ||
-          projectedVert[i].y < -1 || projectedVert[i].y > 1) {
+      if (projectedVert[i].e[0] < -1 || projectedVert[i].e[0] > 1 ||
+          projectedVert[i].e[1] < -1 || projectedVert[i].e[1] > 1) {
         continue;
       }
-      projectedVert[i].x = projectedVert[i].x * MAX_X + (float)MAX_X / 2;
-      projectedVert[i].y = projectedVert[i].y * MAX_Y + (float)MAX_Y / 2;
+      projectedVert[i].e[0] = projectedVert[i].e[0] * MAX_X + (float)MAX_X / 2;
+      projectedVert[i].e[1] = projectedVert[i].e[1] * MAX_Y + (float)MAX_Y / 2;
     }
+    // draw faces
 
-    // draw front and back face of cube and also interconnecting lines
-    draw_line_by_vec3(projectedVert[0], projectedVert[1]);
-    draw_line_by_vec3(projectedVert[1], projectedVert[3]);
-    draw_line_by_vec3(projectedVert[3], projectedVert[2]);
-    draw_line_by_vec3(projectedVert[2], projectedVert[0]);
-
-    draw_line_by_vec3(projectedVert[0 + 4], projectedVert[1 + 4]);
-    draw_line_by_vec3(projectedVert[1 + 4], projectedVert[3 + 4]);
-    draw_line_by_vec3(projectedVert[3 + 4], projectedVert[2 + 4]);
-    draw_line_by_vec3(projectedVert[2 + 4], projectedVert[0 + 4]);
-
-    draw_line_by_vec3(projectedVert[0], projectedVert[0 + 4]);
-    draw_line_by_vec3(projectedVert[1], projectedVert[1 + 4]);
-    draw_line_by_vec3(projectedVert[2], projectedVert[2 + 4]);
-    draw_line_by_vec3(projectedVert[3], projectedVert[3 + 4]);
+    draw_faces(&model, projectedVert);
 
     // perform rotation on cube located at origo and offset it by CUBE_DISTANCE
-    for (int k = 0; k < VERTICES_COUNT; ++k) {
-      vec3 current_cube_vertex = cube_vertices[k];
+    for (int k = 0; k < vertex_count; ++k) {
+      vec3 current_cube_vertex;
+      current_cube_vertex.x = model.vertex_list[k]->e[0];
+      current_cube_vertex.y = model.vertex_list[k]->e[1];
+      current_cube_vertex.z = model.vertex_list[k]->e[2];
       rotate(&current_cube_vertex, angle / 5, angle, angle / 3);
-      vertices[k] = current_cube_vertex;
-      vertices[k].z += CUBE_DISTANCE;
+      model.vertex_list[k]->e[0] = current_cube_vertex.x;
+      model.vertex_list[k]->e[1] = current_cube_vertex.y;
+      model.vertex_list[k]->e[2] = current_cube_vertex.z + CUBE_DISTANCE;
     }
     angle += 0.1f;
     refresh();
@@ -181,6 +195,8 @@ int main(void) {
   }
 
   /*  Clean up after ourselves  */
+  free(projectedVert);
+  delete_obj_data(&model);
 
   delwin(mainwin);
   endwin();
