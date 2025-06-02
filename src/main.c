@@ -1,4 +1,4 @@
-#include "libs/obj_loader/obj_parser.h"
+#include "obj_parser.h"
 #include <curses.h>
 #include <math.h>
 #include <stdio.h>
@@ -13,8 +13,7 @@ static int MAX_X = 0, MAX_Y = 0;
 const char BACKGROUND_CHAR = '.';
 const char LINE_CHAR = 'x';
 const float MAX_DISTANCE_FROM_LINE = 0.5f;
-const float CUBE_DISTANCE = 10.f;
-const float CUBE_SIDE = 5.f;
+const float MODEL_DISTANCE = 1.5f;
 
 /*    .+------+     */
 /* .'  |    .'|    */
@@ -24,7 +23,7 @@ const float CUBE_SIDE = 5.f;
 /* |.'    | .'    */
 /* +------+'      */
 
-void fill_background() {
+void fill_background(void) {
   erase();
   for (int row = 0; row < MAX_Y; ++row) {
     for (int col = 0; col < MAX_X; ++col) {
@@ -74,7 +73,20 @@ bool is_point_part_of_line(int starty, int startx, int endy, int endx,
   return distance < MAX_DISTANCE_FROM_LINE ? true : false;
 }
 
+int clamp_to_screen(const int coord, const int min, const int max) {
+  int clamped_coord = coord;
+  if (coord < min)
+    clamped_coord = 0;
+  if (coord > max)
+    clamped_coord = max;
+  return clamped_coord;
+}
+
 void draw_line(int starty, int startx, int endy, int endx) {
+  starty = clamp_to_screen(starty, 0, MAX_Y);
+  startx = clamp_to_screen(startx, 0, MAX_X);
+  endy = clamp_to_screen(endy, 0, MAX_Y);
+  endx = clamp_to_screen(endx, 0, MAX_X);
   for (int row = 0; row < MAX_Y; ++row) {
     for (int col = 0; col < MAX_X; ++col) {
       if (is_point_part_of_line(starty, startx, endy, endx, row, col)) {
@@ -92,11 +104,11 @@ void draw_line_by_obj_vector(struct obj_vector start, struct obj_vector end) {
   draw_line(start.e[1], start.e[0], end.e[1], end.e[0]);
 }
 
-void draw_faces(struct obj_scene_data *model,
+void draw_faces(const struct obj_scene_data *model,
                 struct obj_vector *projected_vertices) {
-  for (size_t i = 0; i < model->face_count; ++i) {
+  for (int32_t i = 0; i < model->face_count; ++i) {
     struct obj_face current_face = *model->face_list[i];
-    for (size_t j = 0; j < current_face.vertex_count; ++j) {
+    for (int32_t j = 0; j < current_face.vertex_count; ++j) {
       struct obj_vector start =
           projected_vertices[current_face.vertex_index[j]];
       struct obj_vector end = projected_vertices
@@ -132,6 +144,38 @@ void rotate(vec3 *point, float yaw, float pitch, float roll) {
   point->z = R[2][0] * x + R[2][1] * y + R[2][2] * z;
 }
 
+void center_and_scale_model(struct obj_scene_data *model, float scale) {
+  printf("scale: %f\n", scale);
+  float cx = 0.f, cy = 0.f, cz = 0.f;
+  float maxx = 0.f, maxy = 0.f, maxz = 0.f;
+  for (int32_t i = 0; i < model->vertex_count; ++i) {
+    cx += model->vertex_list[i]->e[0];
+    cy += model->vertex_list[i]->e[1];
+    cz += model->vertex_list[i]->e[2];
+    if (fabs(model->vertex_list[i]->e[0]) > fabs(maxx))
+      maxx = model->vertex_list[i]->e[0];
+    if (fabs(model->vertex_list[i]->e[1]) > fabs(maxy))
+      maxy = model->vertex_list[i]->e[1];
+    if (fabs(model->vertex_list[i]->e[2]) > fabs(maxz))
+      maxz = model->vertex_list[i]->e[2];
+  }
+  printf("Max coordinates: %f %f %f\n", maxx, maxy, maxz);
+  cx /= model->vertex_count;
+  cy /= model->vertex_count;
+  cz /= model->vertex_count;
+  printf("Middle coordinates: %f %f %f\n", cx, cy, cz);
+  for (int32_t i = 0; i < model->vertex_count; ++i) {
+    model->vertex_list[i]->e[0] -= cx;
+    model->vertex_list[i]->e[1] -= cy;
+    model->vertex_list[i]->e[2] -= cz;
+    model->vertex_list[i]->e[0] *= scale;
+    model->vertex_list[i]->e[1] *= scale;
+    model->vertex_list[i]->e[2] *= scale;
+  }
+  printf("Scaled down max coordinates: %f %f %f\n", maxx * scale, maxy * scale,
+         maxz * scale);
+}
+
 int main(int argc, char **argv) {
 
   WINDOW *mainwin;
@@ -146,20 +190,41 @@ int main(int argc, char **argv) {
   getmaxyx(mainwin, MAX_Y, MAX_X);
   // load obj file
   struct obj_scene_data model;
-  int error = parse_obj_scene(&model, argv[1]);
-  if (error) {
+  int ok_code = parse_obj_scene(&model, argv[1]);
+  if (!ok_code) {
     fprintf(stderr, "Error! Could not parse provided obj file %s\n", argv[1]);
     exit(EXIT_FAILURE);
   }
+  struct obj_scene_data const_model;
+  ok_code = parse_obj_scene(&const_model, argv[1]);
+  if (!ok_code) {
+    fprintf(stderr, "Error! Could not parse provided obj file %s\n", argv[1]);
+    exit(EXIT_FAILURE);
+  }
+
+  center_and_scale_model(&model, 1.f / 137.f);
+  center_and_scale_model(&const_model, 1.f / 137.f);
+
   int vertex_count = model.vertex_count;
 
   struct obj_vector *projectedVert =
       malloc(sizeof(struct obj_vector) * vertex_count);
   float angle = 0;
 
+  for (int32_t k = 0; k < vertex_count; ++k) {
+    vec3 current_cube_vertex;
+    current_cube_vertex.x = const_model.vertex_list[k]->e[0];
+    current_cube_vertex.y = const_model.vertex_list[k]->e[1];
+    current_cube_vertex.z = const_model.vertex_list[k]->e[2];
+    rotate(&current_cube_vertex, 0, 0, 3.14f / 2.f);
+    const_model.vertex_list[k]->e[0] = current_cube_vertex.x;
+    const_model.vertex_list[k]->e[1] = current_cube_vertex.y;
+    const_model.vertex_list[k]->e[2] = current_cube_vertex.z;
+  }
+
   while (1) {
     fill_background();
-    for (uint32_t i = 0; i < vertex_count; ++i) {
+    for (int32_t i = 0; i < vertex_count; ++i) {
       /* https://computergraphics.stackexchange.com/questions/8255/finding-the-projection-matrix-for-one-point-perspective
        */
       projectedVert[i].e[0] =
@@ -178,16 +243,17 @@ int main(int argc, char **argv) {
 
     draw_faces(&model, projectedVert);
 
-    // perform rotation on cube located at origo and offset it by CUBE_DISTANCE
-    for (int k = 0; k < vertex_count; ++k) {
+    // perform rotation on cube located at origo and offset it by MODEL_DISTANCE
+    for (int32_t k = 0; k < vertex_count; ++k) {
       vec3 current_cube_vertex;
-      current_cube_vertex.x = model.vertex_list[k]->e[0];
-      current_cube_vertex.y = model.vertex_list[k]->e[1];
-      current_cube_vertex.z = model.vertex_list[k]->e[2];
-      rotate(&current_cube_vertex, angle / 5, angle, angle / 3);
+      current_cube_vertex.x = const_model.vertex_list[k]->e[0];
+      current_cube_vertex.y = const_model.vertex_list[k]->e[1];
+      current_cube_vertex.z = const_model.vertex_list[k]->e[2];
+      /* rotate(&current_cube_vertex, angle / 5, angle, angle / 3); */
+      rotate(&current_cube_vertex, 0, angle, 0);
       model.vertex_list[k]->e[0] = current_cube_vertex.x;
       model.vertex_list[k]->e[1] = current_cube_vertex.y;
-      model.vertex_list[k]->e[2] = current_cube_vertex.z + CUBE_DISTANCE;
+      model.vertex_list[k]->e[2] = current_cube_vertex.z + MODEL_DISTANCE;
     }
     angle += 0.1f;
     refresh();
